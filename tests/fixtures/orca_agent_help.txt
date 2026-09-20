@@ -1,0 +1,11 @@
+orca agent
+
+Usage: orca agent <command> [options]
+
+Commands:
+  hooks prepare-codex Repair Orca-managed Codex hook trust before a shell launch
+  hooks status       Show whether Orca-managed agent status hooks are enabled
+  hooks off          Disable Orca-managed agent status hooks and remove local hook entries
+  hooks on           Enable Orca-managed agent status hooks
+
+Run `orca agent <command> --help` for command-specific usage.

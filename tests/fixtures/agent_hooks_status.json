@@ -1,0 +1,112 @@
+{
+  "id": "local",
+  "ok": true,
+  "result": {
+    "enabled": true,
+    "settingsPath": "C:\\Users\\kron\\AppData\\Roaming\\orca\\profiles\\local-default\\orca-data.json",
+    "appliedBy": "offline",
+    "statuses": [
+      {
+        "agent": "claude",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.claude\\settings.json",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "openclaude",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.openclaude\\settings.json",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "codex",
+        "state": "installed",
+        "configPath": "C:\\Users\\kron\\AppData\\Roaming\\orca\\codex-runtime-home\\home\\hooks.json",
+        "managedHooksPresent": true,
+        "detail": null
+      },
+      {
+        "agent": "gemini",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.gemini\\settings.json",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "antigravity",
+        "state": "installed",
+        "configPath": "C:\\Users\\kron\\.gemini\\config\\hooks.json",
+        "managedHooksPresent": true,
+        "detail": null
+      },
+      {
+        "agent": "amp",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.config\\amp\\plugins\\orca-agent-status.ts",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "cursor",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.cursor\\hooks.json",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "droid",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.factory\\settings.json",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "grok",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.grok\\hooks\\orca-status.json",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "command-code",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.commandcode\\settings.json",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "copilot",
+        "state": "installed",
+        "configPath": "C:\\Users\\kron\\.copilot\\hooks\\orca.json",
+        "managedHooksPresent": true,
+        "detail": null
+      },
+      {
+        "agent": "hermes",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.hermes\\config.yaml",
+        "managedHooksPresent": false,
+        "detail": null
+      },
+      {
+        "agent": "devin",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\AppData\\Roaming\\devin\\config.json",
+        "managedHooksPresent": false,
+        "detail": "Devin read_config_from.claude is enabled; imported Claude hooks may fire alongside Devin hooks."
+      },
+      {
+        "agent": "kimi",
+        "state": "not_installed",
+        "configPath": "C:\\Users\\kron\\.kimi-code\\config.toml",
+        "managedHooksPresent": false,
+        "detail": null
+      }
+    ]
+  },
+  "_meta": {
+    "runtimeId": "local"
+  }
+}

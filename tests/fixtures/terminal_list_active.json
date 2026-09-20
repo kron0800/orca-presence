@@ -1,0 +1,74 @@
+{
+  "id": "85e4f6fa-2fd9-4907-bb97-e2c5404157de",
+  "ok": true,
+  "result": {
+    "terminals": [
+      {
+        "handle": "term_8d613feb-1b41-4b57-a859-aa1d8caee9d1",
+        "ptyId": "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev@@d110fd69",
+        "incarnationId": "94c9279e-9c31-4363-b926-6740379fde7e",
+        "orphaned": false,
+        "worktreeId": "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev",
+        "worktreePath": "C:/Users/kron/orca/workspaces/orca-presence/presence-dev",
+        "branch": "refs/heads/presence-dev",
+        "tabId": "313d56ef-bd92-4fd5-a014-4e5563a7370c",
+        "leafId": "e9faaaa4-22e8-4e0a-ab36-4ca9fc4276cc",
+        "title": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        "connected": true,
+        "writable": true,
+        "lastOutputAt": 1789939866154,
+        "preview": "                                                                                                                                                                                                                                                                  presence-dev   220ms  presence-dev",
+        "executionHostId": "local"
+      },
+      {
+        "handle": "term_c7662d1a-9414-4e38-85a3-5d7afb5bb087",
+        "ptyId": "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev@@c404d0dd",
+        "incarnationId": "825b2878-3e86-47a9-83b5-21f78478edac",
+        "orphaned": false,
+        "worktreeId": "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev",
+        "worktreePath": "C:/Users/kron/orca/workspaces/orca-presence/presence-dev",
+        "branch": "refs/heads/presence-dev",
+        "tabId": "c8182f24-58a6-459f-a7de-69423e41c64c",
+        "leafId": "f3a35ed7-d56d-4a84-85d7-bf03458b6a66",
+        "title": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        "connected": true,
+        "writable": true,
+        "lastOutputAt": 1789939874931,
+        "preview": "                                                                                                                                                                                                                                                                  presence-dev   190ms  presence-dev",
+        "executionHostId": "local"
+      },
+      {
+        "handle": "term_dce748b5-2623-4d27-8c4a-994684cc2054",
+        "ptyId": "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev@@cc8e925c",
+        "incarnationId": "b6aeadb7-12e5-4f62-b6fc-91549479d9c3",
+        "orphaned": false,
+        "worktreeId": "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev",
+        "worktreePath": "C:/Users/kron/orca/workspaces/orca-presence/presence-dev",
+        "branch": "refs/heads/presence-dev",
+        "tabId": "bd884eb9-6437-4f00-8d94-05735a4ed959",
+        "leafId": "c81da912-d578-4181-89d8-ff7e75fabfac",
+        "title": "OC | Recon CLI de Orca: tokens y campos JS…",
+        "connected": true,
+        "writable": true,
+        "lastOutputAt": 1789940040871,
+        "preview": "                                                                        Length                                                                                   ------ 25940            ⠴■■■■■■⬝⬝$ ps exit=$LASTEXITCODE\"; Get-Item test/fixtures/worktree_ps.json |Selct-Object Length⠇⠦■■■■■⬝⬝⬝⠏■■■■⬝⬝⬝⬝⠧",
+        "executionHostId": "local",
+        "agentIdentity": "opencode"
+      }
+    ],
+    "hostScope": {
+      "hostIds": [
+        "local"
+      ],
+      "omittedHostIds": []
+    },
+    "topologyRevisions": {
+      "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev": 3
+    },
+    "totalCount": 3,
+    "truncated": false
+  },
+  "_meta": {
+    "runtimeId": "8d3c9764-a0c8-4089-a7a9-6b9c00f91ea2"
+  }
+}

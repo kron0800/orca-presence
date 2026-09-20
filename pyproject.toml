@@ -1,0 +1,100 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "orca-presence"
+version = "0.1.0"
+description = "Discord Rich Presence bridge for the Orca ADE runtime"
+requires-python = ">=3.11"
+keywords = ["discord", "orca", "presence", "rich-presence"]
+dependencies = [
+    "pydantic>=2.6",
+    "pypresence>=4.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.1",
+    "mypy>=1.8",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.3",
+]
+
+[project.scripts]
+orca-presence = "orca_presence.main:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["orca_presence"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-ra"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["orca_presence", "tests"]
+exclude = ["\\.venv/", "build/", "dist/"]
+# Extra strictness on top of `strict = true`: every `# type: ignore` must name
+# its error code, obviously dead branches and redundant boolean tests are
+# reported, and bool-typed values cannot be used where a bool is not expected.
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+
+[[tool.mypy.overrides]]
+# pypresence ships a partially annotated py.typed distribution whose untyped
+# members (AioClient.start, several exception constructors) would otherwise fail
+# strict mode. Skip analyzing it so its symbols are treated as Any, while the
+# rest of the codebase stays fully checked under [tool.mypy] strict = true.
+module = ["pypresence", "pypresence.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+extend-exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+# Strict lint set: pycodestyle/pyflakes errors (E/F/W), import sorting (I),
+# pyupgrade (UP), bugbear (B), simplify (SIM), comprehensions (C4), pathlib (PTH),
+# Ruff-specific checks (RUF), no stray prints (T20) and logging hygiene
+# (G/LOG/PIE), plus import-convention checks (ISC/ICN/PGH).
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "C4",
+    "PTH",
+    "RUF",
+    "T20",
+    "G",
+    "LOG",
+    "PIE",
+    "ISC",
+    "ICN",
+    "PGH",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["orca_presence"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+extend-exclude = '''
+/(
+    \.venv
+  | build
+  | dist
+)/
+'''

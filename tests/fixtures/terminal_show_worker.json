@@ -1,0 +1,30 @@
+{
+  "id": "0c548acc-f8e7-43e3-878c-0c552a69f65f",
+  "ok": true,
+  "result": {
+    "terminal": {
+      "handle": "term_dce748b5-2623-4d27-8c4a-994684cc2054",
+      "ptyId": "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev@@cc8e925c",
+      "incarnationId": "b6aeadb7-12e5-4f62-b6fc-91549479d9c3",
+      "orphaned": false,
+      "worktreeId": "aef9c836-3c78-4773-b012-fdb26a393f62::C:/Users/kron/orca/workspaces/orca-presence/presence-dev",
+      "worktreePath": "C:/Users/kron/orca/workspaces/orca-presence/presence-dev",
+      "branch": "refs/heads/presence-dev",
+      "tabId": "bd884eb9-6437-4f00-8d94-05735a4ed959",
+      "leafId": "c81da912-d578-4181-89d8-ff7e75fabfac",
+      "title": "OC | Recon CLI de Orca: tokens y campos JS…",
+      "connected": true,
+      "writable": true,
+      "lastOutputAt": 1789940086104,
+      "preview": "                                                  presence-dev:presence-dev\n╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n⬝⬝⬝⬝⬝⬝⬝⬝  esc interrupt                                          48.7K (5%) · $0.01  ctrl+p commands    • OpenCode 1.18.31",
+      "executionHostId": "local",
+      "agentIdentity": "opencode",
+      "paneRuntimeId": 1,
+      "rendererGraphEpoch": 0,
+      "agentWait": null
+    }
+  },
+  "_meta": {
+    "runtimeId": "8d3c9764-a0c8-4089-a7a9-6b9c00f91ea2"
+  }
+}
