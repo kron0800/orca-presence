@@ -11,3 +11,8 @@ dist/
 .env
 *.log
 
+
+# local tooling / artifacts
+.venv-check/
+*.bak
+SMOKE_REPORT.md
