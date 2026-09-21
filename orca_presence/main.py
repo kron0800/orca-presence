@@ -1,16 +1,22 @@
 """Executable entry point for the orca-presence daemon.
 
 ``python -m orca_presence.main`` (or the ``orca-presence`` console script,
-which points at :func:`run`) resolves the configuration, configures logging and
-runs the poller until SIGINT or SIGTERM arrives.
+which points at :func:`run`) loads the ``.env`` file, resolves the
+configuration, configures logging and runs the poller until SIGINT or SIGTERM
+arrives.
 
 Shutdown is deliberate and ordered:
 
 1. the signal sets an :class:`asyncio.Event`, never raising inside the handler;
 2. the poller task is cancelled, which cancels the Discord throttle, clears the
    presence and closes the IPC socket (:meth:`Poller.shutdown` repeats the
-   close, so it also runs when the poller already stopped);
-3. :func:`logging.shutdown` flushes and closes every logging handler.
+   close, so it also runs when the poller already stopped). The whole sequence
+   is bounded by :data:`EMERGENCY_SHUTDOWN_TIMEOUT_SECONDS`, so Ctrl+C always
+   ends the process even when a Discord IPC await never answers; a timed-out
+   shutdown is logged and a bounded best-effort close still tears the socket
+   down;
+3. :func:`logging.shutdown` flushes and closes every logging handler, even
+   after the emergency timeout.
 
 Log levels follow one rule: INFO for connections and lifecycle transitions,
 DEBUG for per-publish detail (the Discord client logs every publish at DEBUG)
@@ -32,7 +38,14 @@ from orca_presence.discord_client import DiscordClientError
 from orca_presence.orca_client import OrcaError
 from orca_presence.poller import Poller
 
-__all__ = ["LOG_LEVEL_ENV", "configure_logging", "main", "run"]
+__all__ = [
+    "EMERGENCY_SHUTDOWN_TIMEOUT_SECONDS",
+    "FORCED_CLOSE_TIMEOUT_SECONDS",
+    "LOG_LEVEL_ENV",
+    "configure_logging",
+    "main",
+    "run",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +53,14 @@ LOG_LEVEL_ENV = "ORCA_PRESENCE_LOG_LEVEL"
 DEFAULT_LOG_LEVEL = "INFO"
 LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# Hard limit for the whole shutdown sequence: Ctrl+C must always end the daemon
+# within a few seconds, even when a Discord IPC await never answers.
+EMERGENCY_SHUTDOWN_TIMEOUT_SECONDS: float = 8.0
+
+# Second, shorter bound for the best-effort socket close attempted after the
+# emergency timeout fired. It only covers a close that never got to run.
+FORCED_CLOSE_TIMEOUT_SECONDS: float = 1.0
 
 EXIT_OK = 0
 EXIT_FAILURE = 1
@@ -181,16 +202,82 @@ async def _serve(config: Config) -> int:
         finally:
             stop_task.cancel()
             run_task.cancel()
-            await asyncio.gather(stop_task, run_task, return_exceptions=True)
-            await poller.shutdown()
+            await _emergency_shutdown(poller, stop_task, run_task)
 
-    if run_task.cancelled():
+    if run_task.cancelled() or not run_task.done():
+        # The emergency timeout may have left the poller task pending; the
+        # process is exiting either way.
         return EXIT_OK
     error = run_task.exception()
     if error is None:
         return EXIT_OK
     logger.error("Unrecoverable presence error: %s", _describe(error))
     return EXIT_FAILURE
+
+
+async def _emergency_shutdown(
+    poller: Poller,
+    stop_task: asyncio.Task[bool],
+    run_task: asyncio.Task[None],
+) -> None:
+    """Cancel the daemon tasks and close the poller under a hard time limit.
+
+    The regular sequence awaits the cancelled tasks and then
+    :meth:`~orca_presence.poller.Poller.shutdown`; a Discord IPC call without a
+    timeout could otherwise keep the process alive forever after Ctrl+C. The
+    whole sequence is bounded by :data:`EMERGENCY_SHUTDOWN_TIMEOUT_SECONDS`;
+    when the limit expires the pending shutdown is abandoned, the timeout is
+    logged at ERROR and a shorter best-effort close still tears the IPC socket
+    down. :func:`logging.shutdown` runs in :func:`run` on every path.
+    """
+
+    timed_out = False
+    try:
+        await asyncio.wait_for(
+            _shutdown(poller, stop_task, run_task),
+            timeout=EMERGENCY_SHUTDOWN_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        timed_out = True
+    except BaseExceptionGroup as exc:
+        # A timeout raised inside a task group arrives wrapped in a group; any
+        # other group is a real error and must keep propagating.
+        if not _is_timeout_group(exc):
+            raise
+        timed_out = True
+
+    if timed_out:
+        logger.error(
+            "Emergency shutdown timed out after %.1fs; forcing the socket closed",
+            EMERGENCY_SHUTDOWN_TIMEOUT_SECONDS,
+        )
+        await _force_close(poller)
+
+
+async def _shutdown(
+    poller: Poller,
+    stop_task: asyncio.Task[bool],
+    run_task: asyncio.Task[None],
+) -> None:
+    """Cancel the daemon tasks and shut the poller down, in order."""
+
+    await asyncio.gather(stop_task, run_task, return_exceptions=True)
+    await poller.shutdown()
+
+
+async def _force_close(poller: Poller) -> None:
+    """Best-effort socket close after the emergency timeout fired.
+
+    The first shutdown attempt was abandoned by :func:`asyncio.wait_for`; this
+    shorter retry covers a close that never got to run, while a close already
+    in flight is idempotent. Failures are logged at DEBUG because the process
+    is exiting anyway.
+    """
+
+    try:
+        await asyncio.wait_for(poller.shutdown(), timeout=FORCED_CLOSE_TIMEOUT_SECONDS)
+    except (TimeoutError, DiscordClientError, OSError, RuntimeError):
+        logger.debug("Forced Discord shutdown failed", exc_info=True)
 
 
 def _is_timeout_group(error: BaseException) -> bool:

@@ -149,3 +149,65 @@ def test_run_does_not_swallow_unexpected_errors(
         run(Config(CLIENT_ID))
 
 
+class _ImmediateShutdown:
+    """Signal context manager that requests shutdown as soon as it is entered."""
+
+    def __init__(self, stop: asyncio.Event) -> None:
+        self._stop = stop
+
+    def __enter__(self) -> _ImmediateShutdown:
+        self._stop.set()
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+
+class _ScriptedPoller:
+    """Poller stand-in whose ``shutdown`` is scripted by the test."""
+
+    def __init__(self, *, hang: bool) -> None:
+        self._hang = hang
+        self.shutdown_calls = 0
+
+    async def run(self) -> None:
+        await asyncio.Event().wait()
+
+    async def shutdown(self) -> None:
+        self.shutdown_calls += 1
+        if self._hang:
+            await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_serve_bounds_the_emergency_shutdown_when_the_poller_hangs(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    poller = _ScriptedPoller(hang=True)
+    monkeypatch.setattr(main_module, "_ShutdownSignals", _ImmediateShutdown)
+    monkeypatch.setattr(main_module, "Poller", lambda _config: poller)
+    monkeypatch.setattr(main_module, "EMERGENCY_SHUTDOWN_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(main_module, "FORCED_CLOSE_TIMEOUT_SECONDS", 0.05)
+    caplog.set_level(logging.ERROR)
+
+    result = await asyncio.wait_for(main_module._serve(Config(CLIENT_ID)), timeout=2.0)
+
+    assert result == EXIT_OK
+    assert poller.shutdown_calls == 2
+    assert "Emergency shutdown timed out" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_serve_shuts_down_cleanly_without_the_emergency_timeout(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    poller = _ScriptedPoller(hang=False)
+    monkeypatch.setattr(main_module, "_ShutdownSignals", _ImmediateShutdown)
+    monkeypatch.setattr(main_module, "Poller", lambda _config: poller)
+    caplog.set_level(logging.ERROR)
+
+    result = await asyncio.wait_for(main_module._serve(Config(CLIENT_ID)), timeout=2.0)
+
+    assert result == EXIT_OK
+    assert poller.shutdown_calls == 1
+    assert "Emergency shutdown timed out" not in caplog.text

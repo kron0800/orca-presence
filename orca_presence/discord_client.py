@@ -15,6 +15,10 @@ adds the behaviour the poller needs:
 * :meth:`DiscordPresenceClient.publish` de-duplicates and rate-limits updates
   through an :class:`~orca_presence.throttle.ActivityThrottle`, so callers can
   push the current activity every poll cycle.
+* every shutdown path is bounded: clearing the presence waits at most
+  :data:`CLEAR_ACTIVITY_TIMEOUT_SECONDS` for Discord's IPC response, so a
+  server at capacity or a broken pipe can never hang ``close`` and keep the
+  daemon alive after Ctrl+C.
 
 The Discord application id is read from the ``ORCA_DISCORD_CLIENT_ID``
 environment variable and is never hardcoded.
@@ -41,6 +45,7 @@ from orca_presence.throttle import DEFAULT_INTERVAL_SECONDS, ActivityThrottle
 
 __all__ = [
     "BACKOFF_FACTOR",
+    "CLEAR_ACTIVITY_TIMEOUT_SECONDS",
     "CLIENT_ID_ENV",
     "INITIAL_BACKOFF_SECONDS",
     "INVALID_CLIENT_ID_CODES",
@@ -61,6 +66,11 @@ CLIENT_ID_ENV = "ORCA_DISCORD_CLIENT_ID"
 INITIAL_BACKOFF_SECONDS: float = 1.0
 MAX_BACKOFF_SECONDS: float = 30.0
 BACKOFF_FACTOR: float = 2.0
+
+# pypresence waits for Discord's IPC answer without a timeout, so a Discord
+# server at capacity (error 1006) or a half-broken pipe can leave a presence
+# clear pending forever and hang shutdown. Closing never waits longer than this.
+CLEAR_ACTIVITY_TIMEOUT_SECONDS: float = 3.0
 
 # Discord IPC error code 4000 is returned by the handshake when the application
 # id is unknown; no number of reconnects can fix a bad client id.
@@ -344,13 +354,37 @@ class DiscordPresenceClient:
             self._connected = False
             if client is None:
                 return
-            if clear_activity:
-                try:
-                    await client.clear_activity()
-                except (PyPresenceException, OSError):
-                    logger.debug("Could not clear the Discord activity", exc_info=True)
-            self._teardown_client(client)
+            try:
+                if clear_activity:
+                    await self._clear_activity(client)
+            finally:
+                # Teardown runs even when the clear times out or this await is
+                # cancelled, so the IPC socket is never left open on shutdown.
+                self._teardown_client(client)
         logger.debug("Discord IPC connection closed")
+
+    async def _clear_activity(self, client: AioClient) -> None:
+        """Clear the presence without ever hanging shutdown.
+
+        pypresence's ``clear_activity`` waits for an IPC response with no
+        timeout of its own, so a Discord server at capacity or a broken pipe
+        can leave that read pending forever. The await is bounded by
+        :data:`CLEAR_ACTIVITY_TIMEOUT_SECONDS`; a timeout or a broken pipe is
+        logged and the connection is dropped anyway.
+        """
+
+        try:
+            await asyncio.wait_for(
+                client.clear_activity(), timeout=CLEAR_ACTIVITY_TIMEOUT_SECONDS
+            )
+        except TimeoutError:
+            logger.warning(
+                "Discord did not answer the presence clear within %.1fs; "
+                "dropping the connection anyway",
+                CLEAR_ACTIVITY_TIMEOUT_SECONDS,
+            )
+        except (PyPresenceException, OSError):
+            logger.debug("Could not clear the Discord activity", exc_info=True)
 
     def _teardown_client(self, client: AioClient) -> None:
         """Close an IPC socket, ignoring an already-broken pipe.

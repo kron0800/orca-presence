@@ -543,3 +543,54 @@ async def test_close_clears_presence_and_closes_the_socket_idempotently() -> Non
     await client.close()
 
     assert fake.clear_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_close_does_not_hang_when_clear_activity_times_out(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    fake = FakeAioClient(clear_delay_seconds=60.0)
+    client = _client(_factory_for(fake))
+    await client.connect()
+    monkeypatch.setattr(discord_client_module, "CLEAR_ACTIVITY_TIMEOUT_SECONDS", 0.01)
+    caplog.set_level(logging.WARNING)
+
+    await asyncio.wait_for(client.close(), timeout=1.0)
+
+    assert fake.clear_calls == 1
+    assert client.connected is False
+    assert fake.sock_writer is not None
+    assert fake.sock_writer.closed is True
+    assert "did not answer the presence clear" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_close_survives_a_broken_pipe_while_clearing() -> None:
+    fake = FakeAioClient(clear_error=OSError("broken pipe"))
+    client = _client(_factory_for(fake))
+    await client.connect()
+
+    await asyncio.wait_for(client.close(), timeout=1.0)
+
+    assert fake.clear_calls == 1
+    assert client.connected is False
+    assert fake.sock_writer is not None
+    assert fake.sock_writer.closed is True
+
+
+@pytest.mark.asyncio
+async def test_cancelling_close_still_tears_the_socket_down() -> None:
+    fake = FakeAioClient(clear_delay_seconds=60.0)
+    client = _client(_factory_for(fake))
+    await client.connect()
+
+    close_task = asyncio.create_task(client.close())
+    await _drain(1)
+    close_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await close_task
+
+    assert client.connected is False
+    assert fake.sock_writer is not None
+    assert fake.sock_writer.closed is True
