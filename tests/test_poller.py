@@ -26,18 +26,27 @@ from orca_presence.orca_client import (
     OrcaNotRunningError,
 )
 from orca_presence.poller import Poller, should_enable_agent_hooks
+from orca_presence.usage_client import UsageSnapshot
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CLIENT_ID = "123456789012345678"
 POLL_INTERVAL = 0.05
 
 
-def _config() -> Config:
+def _config(
+    *,
+    show_usage: bool = False,
+    show_cost: bool = False,
+    usage_interval_seconds: float = POLL_INTERVAL,
+) -> Config:
     return Config(
         client_id=CLIENT_ID,
         poll_interval_seconds=POLL_INTERVAL,
         orca_executable="fake-orca",
         orca_timeout_seconds=0.5,
+        show_usage=show_usage,
+        show_cost=show_cost,
+        usage_interval_seconds=usage_interval_seconds,
     )
 
 
@@ -151,8 +160,33 @@ class FakeDiscordClient(DiscordPresenceClient):
         super().cancel()
 
 
-def _poller(orca: FakeOrcaClient, discord: FakeDiscordClient) -> Poller:
-    return Poller(_config(), orca_client=orca, discord_client=discord)
+class FakeUsageReader:
+    """Scripted usage reader that records calls instead of touching SQLite."""
+
+    def __init__(self, snapshot: UsageSnapshot | None = None) -> None:
+        self.snapshot = snapshot
+        self.calls: list[tuple[str, int]] = []
+        self.called = asyncio.Event()
+
+    def __call__(self, db_path: str, start_ts_ms: int) -> UsageSnapshot | None:
+        self.calls.append((db_path, start_ts_ms))
+        self.called.set()
+        return self.snapshot
+
+
+def _poller(
+    orca: FakeOrcaClient,
+    discord: FakeDiscordClient,
+    *,
+    config: Config | None = None,
+    usage_reader: FakeUsageReader | None = None,
+) -> Poller:
+    return Poller(
+        _config() if config is None else config,
+        orca_client=orca,
+        discord_client=discord,
+        usage_reader=usage_reader,
+    )
 
 
 async def _start(poller: Poller) -> asyncio.Task[None]:
@@ -263,7 +297,8 @@ async def test_poll_loop_publishes_the_normalized_activity() -> None:
     await asyncio.wait_for(discord.published_event.wait(), timeout=1.0)
 
     activity = discord.published[0]
-    assert activity.state == "1 active, 0 blocked"
+    assert activity.details == "1 active, 0 blocked"
+    assert activity.state is None
     assert activity.party_size == (1, 8)
     assert discord.maintain_calls == 1
     await _cancel(task)
@@ -278,7 +313,7 @@ async def test_poll_loop_keeps_running_while_orca_is_not_running() -> None:
 
     task = await _start(poller)
     await asyncio.wait_for(discord.published_event.wait(), timeout=1.0)
-    assert discord.published[0].state == "No agents running"
+    assert discord.published[0].details == "No agents running"
     assert discord.published[0].party_size is None
 
     orca.worktree_error = None
@@ -290,7 +325,7 @@ async def test_poll_loop_keeps_running_while_orca_is_not_running() -> None:
     await asyncio.wait_for(discord.published_event.wait(), timeout=1.0)
 
     assert task.done() is False
-    assert discord.published[0].state == "1 active, 0 blocked"
+    assert discord.published[0].details == "1 active, 0 blocked"
     await _cancel(task)
 
 
@@ -369,6 +404,110 @@ async def test_unrecoverable_discord_errors_propagate_and_close_the_client() -> 
 
     assert any(isinstance(leaf, DiscordAuthError) for leaf in _leaves(excinfo.value))
     assert discord.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_usage_is_not_read_while_disabled() -> None:
+    orca = FakeOrcaClient()
+    orca.worktree_payload = _worktree_payload()
+    discord = FakeDiscordClient()
+    reader = FakeUsageReader(UsageSnapshot(tokens=1_780_899, cost_usd=0.59, count=3))
+    poller = _poller(orca, discord, usage_reader=reader)
+
+    task = await _start(poller)
+    await asyncio.wait_for(orca.worktree_polled.wait(), timeout=1.0)
+    await asyncio.sleep(0.1)
+
+    assert reader.calls == []
+    assert discord.published[-1].details == "1 active, 0 blocked"
+    assert discord.published[-1].state is None
+    await _cancel(task)
+
+
+@pytest.mark.asyncio
+async def test_usage_loop_publishes_tokens_when_enabled() -> None:
+    orca = FakeOrcaClient()
+    orca.worktree_payload = _worktree_payload()
+    discord = FakeDiscordClient()
+    reader = FakeUsageReader(UsageSnapshot(tokens=1_780_899, cost_usd=0.59, count=3))
+    config = _config(show_usage=True)
+    poller = _poller(orca, discord, config=config, usage_reader=reader)
+
+    task = await _start(poller)
+    await asyncio.wait_for(reader.called.wait(), timeout=1.0)
+    discord.published_event.clear()
+    await asyncio.wait_for(discord.published_event.wait(), timeout=1.0)
+
+    assert reader.calls[0] == (config.usage_db_path, poller.start_ts * 1000)
+    assert discord.published[-1].details == "1 active, 0 blocked"
+    assert discord.published[-1].state == "Usage: 1.78M tok"
+    await _cancel(task)
+
+
+@pytest.mark.asyncio
+async def test_usage_cost_is_shown_only_when_enabled() -> None:
+    orca = FakeOrcaClient()
+    orca.worktree_payload = _worktree_payload()
+    discord = FakeDiscordClient()
+    reader = FakeUsageReader(UsageSnapshot(tokens=1_780_899, cost_usd=0.59, count=3))
+    poller = _poller(
+        orca,
+        discord,
+        config=_config(show_usage=True, show_cost=True),
+        usage_reader=reader,
+    )
+
+    task = await _start(poller)
+    await asyncio.wait_for(reader.called.wait(), timeout=1.0)
+    discord.published_event.clear()
+    await asyncio.wait_for(discord.published_event.wait(), timeout=1.0)
+
+    assert discord.published[-1].details == "1 active, 0 blocked"
+    assert discord.published[-1].state == "Usage: 1.78M tok · USD 0.59"
+    await _cancel(task)
+
+
+@pytest.mark.asyncio
+async def test_usage_loop_uses_its_own_interval() -> None:
+    orca = FakeOrcaClient()
+    orca.worktree_payload = _worktree_payload()
+    discord = FakeDiscordClient()
+    reader = FakeUsageReader(UsageSnapshot(tokens=1_000, cost_usd=0.0, count=1))
+    poller = _poller(
+        orca,
+        discord,
+        config=_config(show_usage=True, usage_interval_seconds=0.5),
+        usage_reader=reader,
+    )
+
+    task = await _start(poller)
+    await asyncio.wait_for(orca.worktree_polled.wait(), timeout=1.0)
+    await asyncio.sleep(0.15)
+
+    assert orca.worktree_calls >= 2
+    assert len(reader.calls) == 1
+    await _cancel(task)
+
+
+@pytest.mark.asyncio
+async def test_usage_failure_keeps_the_agent_state() -> None:
+    orca = FakeOrcaClient()
+    orca.worktree_payload = _worktree_payload()
+    discord = FakeDiscordClient()
+    reader = FakeUsageReader(None)
+    poller = _poller(
+        orca, discord, config=_config(show_usage=True), usage_reader=reader
+    )
+
+    task = await _start(poller)
+    await asyncio.wait_for(reader.called.wait(), timeout=1.0)
+    discord.published_event.clear()
+    await asyncio.wait_for(discord.published_event.wait(), timeout=1.0)
+
+    assert discord.published[-1].details == "1 active, 0 blocked"
+    assert discord.published[-1].state is None
+    assert task.done() is False
+    await _cancel(task)
 
 
 @pytest.mark.asyncio

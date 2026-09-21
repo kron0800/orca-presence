@@ -104,12 +104,13 @@ def _set_activity_kwargs(activity: DiscordActivity) -> dict[str, object]:
     """
 
     kwargs: dict[str, object] = {
-        "state": activity.state,
         "details": activity.details,
         "start": activity.start_ts,
         "large_image": activity.large_image,
         "large_text": activity.large_text,
     }
+    if activity.state is not None:
+        kwargs["state"] = activity.state
     if activity.party_size is not None:
         kwargs["party_size"] = [activity.party_size[0], activity.party_size[1]]
     return kwargs
@@ -213,7 +214,7 @@ class DiscordPresenceClient:
                 self._mark_disconnected()
                 return False
             self._throttle.mark_published(activity)
-            logger.debug("Published presence: %s", activity.state)
+            logger.debug("Published presence: %s", activity.details)
             return True
 
     async def connect(self) -> None:

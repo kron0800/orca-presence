@@ -19,6 +19,7 @@ from pypresence.exceptions import (
     ServerError,
 )
 
+import orca_presence.discord_client as discord_client_module
 from orca_presence.activity_builder import DiscordActivity
 from orca_presence.discord_client import (
     CLIENT_ID_ENV,
@@ -68,12 +69,14 @@ class FakeAioClient:
         start_error: Exception | None = None,
         send_error: Exception | None = None,
         clear_error: Exception | None = None,
+        clear_delay_seconds: float | None = None,
     ) -> None:
         self.client_id = "fake"
         self.sock_writer: FakeWriter | None = None
         self.start_error = start_error
         self.send_error = send_error
         self.clear_error = clear_error
+        self.clear_delay_seconds = clear_delay_seconds
         self.sent: list[dict[str, object]] = []
         self.clear_calls = 0
         self.close_frames = 0
@@ -93,6 +96,10 @@ class FakeAioClient:
         self.clear_calls += 1
         if self.clear_error is not None:
             raise self.clear_error
+        if self.clear_delay_seconds is not None:
+            # Simulates pypresence's read_output waiting for an IPC answer that
+            # never arrives while Discord reports "server at capacity".
+            await asyncio.sleep(self.clear_delay_seconds)
 
     def send_data(self, op: int, payload: object) -> None:
         self.close_frames += 1
@@ -123,7 +130,7 @@ class SpyThrottle(ActivityThrottle):
 
 def _activity(
     *,
-    state: str = "1 active, 0 blocked",
+    state: str | None = "1 active, 0 blocked",
     party_size: tuple[int, int] | None = (1, 1),
 ) -> DiscordActivity:
     return DiscordActivity(
@@ -428,6 +435,18 @@ async def test_publish_flattens_the_activity_for_pypresence() -> None:
         is True
     )
     assert "party_size" not in fake.sent[-1]
+
+
+@pytest.mark.asyncio
+async def test_publish_omits_a_missing_state() -> None:
+    fake = FakeAioClient()
+    client = _client(_factory_for(fake))
+    await client.connect()
+
+    assert await client.publish(_activity(state=None)) is True
+
+    assert "state" not in fake.sent[-1]
+    assert fake.sent[-1]["details"] == "Playing Orca ADE"
 
 
 @pytest.mark.asyncio

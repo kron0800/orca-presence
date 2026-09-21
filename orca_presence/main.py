@@ -193,6 +193,16 @@ async def _serve(config: Config) -> int:
     return EXIT_FAILURE
 
 
+def _is_timeout_group(error: BaseException) -> bool:
+    """True for a timeout or an exception group made only of timeouts."""
+
+    if isinstance(error, TimeoutError):
+        return True
+    if isinstance(error, BaseExceptionGroup):
+        return all(_is_timeout_group(child) for child in error.exceptions)
+    return False
+
+
 def _describe(error: BaseException) -> str:
     """Describe an exception, unwrapping the first leaf of an exception group."""
 

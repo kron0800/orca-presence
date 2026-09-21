@@ -1,6 +1,6 @@
 """Async poller that mirrors Orca agent activity into Discord Rich Presence.
 
-:class:`Poller` owns the daemon's two long-lived coroutines and runs them in a
+:class:`Poller` owns the daemon's long-lived coroutines and runs them in a
 single :class:`asyncio.TaskGroup` (Python 3.11):
 
 * the poll loop reads the live agents from ``orca worktree ps --json`` through
@@ -11,15 +11,21 @@ single :class:`asyncio.TaskGroup` (Python 3.11):
 * the Discord loop keeps the IPC connection alive through
   :meth:`~orca_presence.discord_client.DiscordPresenceClient.maintain` and
   publishes the latest activity through
-  :meth:`~orca_presence.discord_client.DiscordPresenceClient.publish`.
+  :meth:`~orca_presence.discord_client.DiscordPresenceClient.publish`;
+* the usage loop, created only while ``config.show_usage`` is enabled, reads
+  the OpenCode usage database every ``config.usage_interval_seconds`` seconds
+  through :func:`~orca_presence.usage_client.read_usage_or_none` and stores the
+  latest :class:`~orca_presence.usage_client.UsageSnapshot`.
 
-The two tasks never call each other directly. The poll loop stores every
-activity in :class:`_ActivityState`, an ``asyncio.Lock``-protected slot with an
+The tasks never call each other directly. The poll loop stores every activity
+in :class:`_ActivityState`, an ``asyncio.Lock``-protected slot with an
 ``asyncio.Event`` wake-up, and the Discord loop waits on that state: a slow or
 disconnected Discord therefore never blocks the Orca polling cadence, and a
 failed publish never loses the newest activity because
 :meth:`~orca_presence.discord_client.DiscordPresenceClient.publish` remembers
-it and republishes it after reconnecting.
+it and republishes it after reconnecting. The usage loop stores its snapshot in
+the lock-protected :class:`_UsageState`, which the poll loop reads when it
+builds an activity; its interval is independent from the Orca poll interval.
 
 Startup behaviour
 -----------------
@@ -63,13 +69,15 @@ from orca_presence.orca_client import (
     OrcaNotRunningError,
     OrcaTimeoutError,
 )
+from orca_presence.usage_client import UsageSnapshot, read_usage_or_none
 
-__all__ = ["Poller", "should_enable_agent_hooks"]
+__all__ = ["Poller", "UsageReader", "should_enable_agent_hooks"]
 
 logger = logging.getLogger(__name__)
 
 Clock = Callable[[], float]
 SleepFn = Callable[[float], Awaitable[None]]
+UsageReader = Callable[[str, int], UsageSnapshot | None]
 
 # Presence shown while the Orca runtime is unreachable: no agent can be running.
 _IDLE_SNAPSHOT = AgentSnapshot(active=0, blocked=0, total=0)
@@ -124,6 +132,31 @@ class _ActivityState:
                 return activity
 
 
+class _UsageState:
+    """Latest usage snapshot shared between the usage loop and the poll loop.
+
+    The usage loop writes and the poll loop reads; both sides take
+    :attr:`_lock`, so a snapshot can never be observed half-updated. A missing
+    snapshot is simply ``None`` and means "no usage data to show".
+    """
+
+    def __init__(self) -> None:
+        self._lock = asyncio.Lock()
+        self._snapshot: UsageSnapshot | None = None
+
+    async def set(self, snapshot: UsageSnapshot) -> None:
+        """Store ``snapshot`` as the newest usage reading."""
+
+        async with self._lock:
+            self._snapshot = snapshot
+
+    async def get(self) -> UsageSnapshot | None:
+        """Return the latest snapshot, or ``None`` before the first read."""
+
+        async with self._lock:
+            return self._snapshot
+
+
 class Poller:
     """Poll Orca and mirror the live agent counts into Discord Rich Presence.
 
@@ -136,6 +169,8 @@ class Poller:
     :param clock: wall-clock source used for the Discord ``start`` timestamp,
         injectable for tests.
     :param sleep: sleep function used by the poll loop, injectable for tests.
+    :param usage_reader: optional usage reader override; defaults to
+        :func:`~orca_presence.usage_client.read_usage_or_none`.
 
     The poller closes the Discord connection when :meth:`run` returns or is
     cancelled; :meth:`shutdown` does the same explicitly and is idempotent.
@@ -149,6 +184,7 @@ class Poller:
         discord_client: DiscordPresenceClient | None = None,
         clock: Clock = time.time,
         sleep: SleepFn = asyncio.sleep,
+        usage_reader: UsageReader | None = None,
     ) -> None:
         self._config = config
         self._orca = (
@@ -165,7 +201,11 @@ class Poller:
         )
         self._clock = clock
         self._sleep = sleep
+        self._usage_reader = (
+            read_usage_or_none if usage_reader is None else usage_reader
+        )
         self._state = _ActivityState()
+        self._usage = _UsageState()
         self._start_ts = int(clock())
         self._orca_online: bool | None = None
         self._last_poll_error: str | None = None
@@ -203,11 +243,18 @@ class Poller:
             "Starting the Orca presence poller (poll interval %.1fs)",
             self._config.poll_interval_seconds,
         )
+        if self._config.show_usage:
+            logger.info(
+                "Usage tracking is enabled (usage interval %.1fs)",
+                self._config.usage_interval_seconds,
+            )
         await self._enable_agent_hooks()
         try:
             async with asyncio.TaskGroup() as tasks:
                 tasks.create_task(self._poll_loop())
                 tasks.create_task(self._discord_loop())
+                if self._config.show_usage:
+                    tasks.create_task(self._usage_loop())
         finally:
             await self._discord.close()
             logger.info("Orca presence poller stopped")
@@ -269,12 +316,18 @@ class Poller:
         presence is kept.
         """
 
+        usage = await self._usage.get()
         try:
             payload = await self._orca.worktree_ps()
         except OrcaNotRunningError as exc:
             self._set_orca_online(False)
             logger.debug("Orca runtime is not running: %s", exc)
-            return build_activity(_IDLE_SNAPSHOT, self._start_ts)
+            return build_activity(
+                _IDLE_SNAPSHOT,
+                self._start_ts,
+                usage=usage,
+                show_cost=self._config.show_cost,
+            )
         except OrcaCliNotFoundError as exc:
             self._report_poll_error(
                 f"Orca CLI executable {self._orca.executable!r} was not found or "
@@ -301,7 +354,42 @@ class Poller:
             snapshot.blocked,
             snapshot.total,
         )
-        return build_activity(snapshot, self._start_ts)
+        return build_activity(
+            snapshot,
+            self._start_ts,
+            usage=usage,
+            show_cost=self._config.show_cost,
+        )
+
+    async def _usage_loop(self) -> None:
+        """Refresh the OpenCode usage snapshot every usage interval.
+
+        This loop is only created while ``show_usage`` is enabled. The reader
+        never raises: :func:`~orca_presence.usage_client.read_usage_or_none`
+        logs and returns ``None`` when the database is missing or unreadable,
+        in which case the previous snapshot is kept.
+        """
+
+        logger.debug(
+            "Reading OpenCode usage from %s every %.1fs",
+            self._config.usage_db_path,
+            self._config.usage_interval_seconds,
+        )
+        while True:
+            cycle_started = self._clock()
+            snapshot = self._usage_reader(
+                self._config.usage_db_path, self._start_ts * 1000
+            )
+            if snapshot is not None:
+                await self._usage.set(snapshot)
+                logger.debug(
+                    "OpenCode usage: %d tokens, $%.2f over %d session(s)",
+                    snapshot.tokens,
+                    snapshot.cost_usd,
+                    snapshot.count,
+                )
+            elapsed = self._clock() - cycle_started
+            await self._sleep(max(0.0, self._config.usage_interval_seconds - elapsed))
 
     def _set_orca_online(self, online: bool) -> None:
         """Log an INFO transition when the Orca runtime comes or goes away."""

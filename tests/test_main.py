@@ -6,6 +6,7 @@ so every exit-code path can be exercised without an event loop or a daemon.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 from pathlib import Path
@@ -19,6 +20,7 @@ from orca_presence.main import (
     EXIT_CONFIG_ERROR,
     EXIT_FAILURE,
     EXIT_INTERRUPTED,
+    EXIT_OK,
     LOG_LEVEL_ENV,
     configure_logging,
     run,
@@ -145,3 +147,5 @@ def test_run_does_not_swallow_unexpected_errors(
 
     with pytest.raises(KeyError, match="bug"):
         run(Config(CLIENT_ID))
+
+

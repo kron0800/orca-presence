@@ -11,6 +11,7 @@ keywords = ["discord", "orca", "presence", "rich-presence"]
 dependencies = [
     "pydantic>=2.6",
     "pypresence>=4.2",
+    "tzdata>=2024.1; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

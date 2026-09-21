@@ -25,6 +25,7 @@ Orca database and never parses terminal text.
 | Piece | Behaviour |
 |-------|-----------|
 | Poll loop | Runs `orca worktree ps --json` every `poll_interval_seconds` (default 15s) and normalizes `agents[].state` into `active` / `blocked` / `total` counts. |
+| Usage loop | Only while `ORCA_PRESENCE_SHOW_USAGE` is on: reads the local OpenCode database every `ORCA_PRESENCE_USAGE_INTERVAL_SECONDS` (default 300s) in read-only mode and aggregates tokens/cost for sessions updated since the daemon started. |
 | Discord loop | Keeps a `pypresence` IPC connection to the Discord desktop client alive, reconnecting with exponential backoff (1s → 30s) and republishing the latest activity after every reconnect. |
 | Throttle | De-duplicates unchanged activities but re-sends them once per interval, so a presence lost by Discord is always restored. |
 | Orca closed | The runtime-unavailable error (`runtime_unavailable`) switches the presence to `No agents running` and polling keeps retrying; when Orca comes back the counts resume automatically. |
@@ -101,10 +102,11 @@ create one in the [Discord Developer Portal](https://discord.com/developers/appl
   will show the activity without the large image. Either upload an asset with
   that key, or point the daemon at an existing key with
   `ORCA_PRESENCE_LARGE_IMAGE`. The daemon never fails over a missing asset.
-- **There is no token/cost slot.** Orca CLI 1.4.205 exposes no token or cost
-  command (verified in `SPIKE.md`), so this project publishes no token totals
-  and advertises no token field. Token counters live in the OpenCode sqlite
-  database, not behind the Orca CLI, and are deliberately out of scope.
+- **Token/cost data is opt-in.** Orca CLI 1.4.205 exposes no token or cost
+  command (verified in `SPIKE.md`), but the local OpenCode database tracks both.
+  Set `ORCA_PRESENCE_SHOW_USAGE=true` to append the humanized token total to the
+  state, and `ORCA_PRESENCE_SHOW_COST=true` to also append the estimated cost.
+  The database is opened read-only; the toggle defaults to off.
 - **Application ID, not bot token.** If you paste a bot token into
   `ORCA_DISCORD_CLIENT_ID`, the handshake is rejected (code `4000`) and the
   daemon exits with a `CRITICAL` log line telling you so.
@@ -116,8 +118,9 @@ create one in the [Discord Developer Portal](https://discord.com/developers/appl
 Every setting is resolved from, in order of precedence:
 
 1. environment variables,
-2. a TOML file,
-3. the documented defaults.
+2. the `.env` file (loaded at startup; real environment variables win),
+3. a TOML file,
+4. the documented defaults.
 
 ### Environment variables
 
@@ -127,6 +130,11 @@ Every setting is resolved from, in order of precedence:
 | `ORCA_PRESENCE_POLL_INTERVAL_SECONDS` | `15` | Seconds between Orca polls; also the Discord publish throttle interval. |
 | `ORCA_PRESENCE_ORCA_EXECUTABLE` | `orca` | Orca CLI command or full path. Use this when `orca` is not on `PATH`. A leading `~` is expanded. |
 | `ORCA_PRESENCE_ORCA_TIMEOUT_SECONDS` | `5` | Maximum seconds per Orca CLI invocation; the child is killed on timeout. |
+| `ORCA_PRESENCE_SHOW_USAGE` | `false` | Enable the OpenCode token part of the Discord state. While off, the usage database is never read. |
+| `ORCA_PRESENCE_SHOW_COST` | `false` | Append the estimated USD cost to the usage part. Only meaningful with `ORCA_PRESENCE_SHOW_USAGE` on. |
+| `ORCA_PRESENCE_USAGE_INTERVAL_SECONDS` | `300` | Seconds between usage database reads; independent from the Orca poll interval. |
+| `ORCA_PRESENCE_USAGE_DB_PATH` | `~/.local/share/opencode/opencode.db` | Local OpenCode database, read in read-only mode. A leading `~` is expanded. |
+| `ORCA_PRESENCE_TIMEZONE` | `America/Argentina/Cordoba` | IANA time zone used only to render times for presentation. |
 | `ORCA_PRESENCE_CONFIG_FILE` | `./orca-presence.toml` | Explicit TOML file; must exist when set. |
 | `ORCA_PRESENCE_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` or a numeric level. |
 | `ORCA_PRESENCE_LARGE_IMAGE` | `orca_ade` | Large image asset key. Set it to an asset that exists in *your* Discord Application. |
@@ -148,10 +156,37 @@ client_id = "123456789012345678"
 poll_interval_seconds = 15.0
 orca_executable = "orca"
 orca_timeout_seconds = 5.0
+show_usage = true
+show_cost = true
+usage_interval_seconds = 300.0
+usage_db_path = "~/.local/share/opencode/opencode.db"
+timezone = "America/Argentina/Cordoba"
 ```
 
 Unknown keys and invalid values are rejected at startup with a precise error
 instead of failing later at runtime.
+
+### Usage and cost
+
+While `show_usage` is on, the daemon reads the local OpenCode database every
+`usage_interval_seconds` and fills both presence lines: the agent summary in
+`details` and the accumulated tokens in `state`:
+
+```
+details: 1 active, 0 blocked
+state:   Usage: 1.78M tok
+state:   Usage: 1.78M tok · USD 0.59   # when show_cost is on
+```
+
+Without usage data the `state` line is omitted, so the presence shows the agent
+summary on its own.
+
+Token counts are humanized (`25000` → `25.0K`, `1780899` → `1.78M`) and sum the
+input, output and reasoning columns of every session whose `time_updated` falls
+inside the window. The database is opened read-only; if a running OpenCode
+process holds a lock, a temporary copy is read instead. A missing, locked or
+unreadable database only logs a warning: the presence keeps working with the
+plain agent counts.
 
 ---
 
