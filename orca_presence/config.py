@@ -4,8 +4,9 @@ Configuration is never hardcoded at the call sites: :class:`Config` resolves
 every value from, in order of precedence:
 
 1. environment variables,
-2. a TOML file,
-3. the documented defaults below.
+2. the ``.env`` file (loaded by :func:`load_env_file`),
+3. a TOML file,
+4. the documented defaults below.
 
 The Discord application id has no default at all, so it can only come from the
 environment, the ``.env`` file or the TOML file and never from the source tree.
@@ -44,6 +45,25 @@ explicitly (by argument or environment variable) must exist and be valid.
     poll_interval_seconds = 15.0
     orca_executable = "orca"
     orca_timeout_seconds = 5.0
+    show_usage = true
+    show_cost = true
+    usage_interval_seconds = 300.0
+    usage_db_path = "~/.local/share/opencode/opencode.db"
+    timezone = "America/Argentina/Cordoba"
+
+``.env`` file
+-------------
+The ``.env`` file (``.env`` in the current working directory, or the file
+named by ``ORCA_PRESENCE_ENV_FILE``) is loaded by :func:`load_env_file` before
+configuration resolution. It is a flat ``KEY=value`` list: blank lines,
+leading ``#`` comments and the ``export`` prefix are ignored, surrounding
+double or single quotes on the value are stripped, and a key that is already
+present in the environment is never overwritten. The file itself is gitignored.
+
+.. code-block:: dotenv
+
+    ORCA_DISCORD_CLIENT_ID=123456789012345678
+    ORCA_PRESENCE_POLL_INTERVAL_SECONDS=15.0
 
 Numeric values may be TOML numbers or numeric strings (environment variables
 are always strings). Every value is validated by :meth:`Config.load` and by
@@ -65,6 +85,7 @@ __all__ = [
     "CLIENT_ID_ENV",
     "CONFIG_FILE_ENV",
     "DEFAULT_CONFIG_FILE_NAME",
+    "DEFAULT_ENV_FILE_NAME",
     "DEFAULT_ORCA_EXECUTABLE",
     "DEFAULT_ORCA_TIMEOUT_SECONDS",
     "DEFAULT_POLL_INTERVAL_SECONDS",
@@ -73,6 +94,7 @@ __all__ = [
     "DEFAULT_TIMEZONE",
     "DEFAULT_USAGE_DB_PATH",
     "DEFAULT_USAGE_INTERVAL_SECONDS",
+    "ENV_FILE_ENV",
     "ORCA_EXECUTABLE_ENV",
     "ORCA_TIMEOUT_ENV",
     "POLL_INTERVAL_ENV",
@@ -84,6 +106,7 @@ __all__ = [
     "Config",
     "ConfigError",
     "find_config_file",
+    "load_env_file",
 ]
 
 CLIENT_ID_ENV = "ORCA_DISCORD_CLIENT_ID"
@@ -96,6 +119,7 @@ USAGE_INTERVAL_ENV = "ORCA_PRESENCE_USAGE_INTERVAL_SECONDS"
 USAGE_DB_PATH_ENV = "ORCA_PRESENCE_USAGE_DB_PATH"
 TIMEZONE_ENV = "ORCA_PRESENCE_TIMEZONE"
 CONFIG_FILE_ENV = "ORCA_PRESENCE_CONFIG_FILE"
+ENV_FILE_ENV = "ORCA_PRESENCE_ENV_FILE"
 
 DEFAULT_POLL_INTERVAL_SECONDS: float = 15.0
 DEFAULT_ORCA_EXECUTABLE = "orca"
@@ -106,6 +130,7 @@ DEFAULT_USAGE_INTERVAL_SECONDS: float = 300.0
 DEFAULT_USAGE_DB_PATH = str(Path("~/.local/share/opencode/opencode.db").expanduser())
 DEFAULT_TIMEZONE = "America/Argentina/Cordoba"
 DEFAULT_CONFIG_FILE_NAME = "orca-presence.toml"
+DEFAULT_ENV_FILE_NAME = ".env"
 
 _TOML_KEYS: frozenset[str] = frozenset(
     {
@@ -298,6 +323,53 @@ class Config:
         )
 
 
+def load_env_file(
+    env: Mapping[str, str] | None = None,
+    *,
+    path: str | Path | None = None,
+) -> frozenset[str]:
+    """Load ``KEY=value`` pairs from a ``.env`` file into the process environment.
+
+    The file is located by ``ORCA_PRESENCE_ENV_FILE`` or ``path`` when given,
+    and otherwise defaults to ``.env`` in the current working directory. A
+    missing default file is a no-op; a file requested explicitly must exist and
+    be readable (otherwise :class:`ConfigError`). Blank lines, ``#`` comments
+    and a leading ``export`` are ignored; a value wrapped in matching single or
+    double quotes has those quotes stripped; and a key that is already set in
+    the environment is never overwritten, so a real environment variable always
+    wins over the file.
+
+    Returns the set of keys actually loaded into the environment, which lets
+    callers log or test what came from the file.
+    """
+
+    environment: Mapping[str, str] = os.environ if env is None else env
+    if path is not None:
+        target = _require_env_file(Path(path), "path argument")
+    elif ENV_FILE_ENV in environment:
+        target = _require_env_file(Path(environment[ENV_FILE_ENV]), ENV_FILE_ENV)
+    else:
+        default = Path(DEFAULT_ENV_FILE_NAME)
+        if not default.is_file():
+            return frozenset()
+        target = default
+
+    loaded: set[str] = set()
+    try:
+        with target.open("r", encoding="utf-8") as handle:
+            for raw in handle:
+                key, value = _parse_env_line(raw)
+                if key is None or value is None:
+                    continue
+                if key in environment:
+                    continue
+                os.environ[key] = value
+                loaded.add(key)
+    except OSError as exc:
+        raise ConfigError(f"{target} could not be read: {exc}") from exc
+    return frozenset(loaded)
+
+
 def find_config_file(env: Mapping[str, str] | None = None) -> Path | None:
     """Locate the TOML configuration file, or return ``None`` when there is none.
 
@@ -312,6 +384,42 @@ def find_config_file(env: Mapping[str, str] | None = None) -> Path | None:
         return _require_file(Path(explicit), CONFIG_FILE_ENV)
     default = Path(DEFAULT_CONFIG_FILE_NAME)
     return default if default.is_file() else None
+
+
+def _require_env_file(path: Path, source: str) -> Path:
+    """Return ``path`` expanded, raising :class:`ConfigError` when not a file."""
+
+    if not str(path).strip():
+        raise ConfigError(f"{source} must not be blank")
+    expanded = path.expanduser()
+    if not expanded.is_file():
+        raise ConfigError(f"{source} does not point to an existing file: {expanded}")
+    return expanded
+
+
+def _parse_env_line(raw: str) -> tuple[str | None, str | None]:
+    """Parse a single ``.env`` line into ``(key, value)`` or ``(None, None)``.
+
+    Lines that are blank, are ``#`` comments, start with an ``export`` prefix
+    or have no ``=`` separator yield ``(None, None)``. A value wrapped in
+    matching single or double quotes has those quotes stripped.
+    """
+
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        return (None, None)
+    if line.startswith("export "):
+        line = line[len("export ") :].lstrip()
+    if "=" not in line:
+        return (None, None)
+    key, _, value = line.partition("=")
+    key = key.strip()
+    if not key:
+        return (None, None)
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    return (key, value)
 
 
 def _require_file(path: Path, source: str) -> Path:

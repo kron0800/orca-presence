@@ -27,7 +27,7 @@ from collections.abc import Callable
 from types import FrameType, TracebackType
 from typing import IO, Self
 
-from orca_presence.config import Config, ConfigError
+from orca_presence.config import Config, ConfigError, load_env_file
 from orca_presence.discord_client import DiscordClientError
 from orca_presence.orca_client import OrcaError
 from orca_presence.poller import Poller
@@ -212,7 +212,12 @@ def _describe(error: BaseException) -> str:
 
 
 def run(config: Config | None = None) -> int:
-    """Entry point: resolve configuration, configure logging, run the daemon.
+    """Entry point: load ``.env``, resolve configuration, run the daemon.
+
+    Before configuration is resolved, :func:`load_env_file` loads the ``.env``
+    file (if present) into the process environment so the same values are seen
+    by :func:`configure_logging` and :meth:`Config.load`. Existing environment
+    variables always win over the file.
 
     Returns the process exit code: :data:`EXIT_OK` on a clean shutdown,
     :data:`EXIT_FAILURE` on a known unrecoverable runtime error,
@@ -227,6 +232,7 @@ def run(config: Config | None = None) -> int:
     bug is never hidden behind an exit code.
     """
 
+    load_env_file()
     configure_logging()
     try:
         resolved = Config.load() if config is None else config

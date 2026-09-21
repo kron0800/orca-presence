@@ -25,6 +25,7 @@ from orca_presence.config import (
     DEFAULT_TIMEZONE,
     DEFAULT_USAGE_DB_PATH,
     DEFAULT_USAGE_INTERVAL_SECONDS,
+    ENV_FILE_ENV,
     ORCA_EXECUTABLE_ENV,
     ORCA_TIMEOUT_ENV,
     POLL_INTERVAL_ENV,
@@ -36,6 +37,7 @@ from orca_presence.config import (
     Config,
     ConfigError,
     find_config_file,
+    load_env_file,
 )
 
 VALID_CLIENT_ID = "123456789012345678"
@@ -339,10 +341,164 @@ def test_find_config_file_returns_the_default_when_present(
 # --- .env loading -----------------------------------------------------------
 
 
+def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clear the keys the loader may write so tests do not leak into each other."""
+
+    for key in (
+        CLIENT_ID_ENV,
+        POLL_INTERVAL_ENV,
+        ORCA_EXECUTABLE_ENV,
+        ORCA_TIMEOUT_ENV,
+        SHOW_USAGE_ENV,
+        SHOW_COST_ENV,
+        USAGE_INTERVAL_ENV,
+        USAGE_DB_PATH_ENV,
+        TIMEZONE_ENV,
+        CONFIG_FILE_ENV,
+        ENV_FILE_ENV,
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 def _write_env(tmp_path: Path, content: str, name: str = ".env") -> Path:
     path = tmp_path / name
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def test_load_env_file_loads_key_value_pairs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _isolate_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    _write_env(
+        tmp_path,
+        "ORCA_DISCORD_CLIENT_ID=123456789012345678\n"
+        "ORCA_PRESENCE_POLL_INTERVAL_SECONDS=30\n",
+    )
+
+    loaded = load_env_file()
+
+    assert os.environ["ORCA_DISCORD_CLIENT_ID"] == "123456789012345678"
+    assert os.environ["ORCA_PRESENCE_POLL_INTERVAL_SECONDS"] == "30"
+    assert loaded == frozenset(
+        {"ORCA_DISCORD_CLIENT_ID", "ORCA_PRESENCE_POLL_INTERVAL_SECONDS"}
+    )
+
+
+def test_load_env_file_ignores_comments_blanks_and_export(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _isolate_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    _write_env(
+        tmp_path,
+        "# comment\n\n   \nexport ORCA_PRESENCE_ORCA_EXECUTABLE=orca-dev\n",
+    )
+
+    loaded = load_env_file()
+
+    assert os.environ["ORCA_PRESENCE_ORCA_EXECUTABLE"] == "orca-dev"
+    assert loaded == frozenset({"ORCA_PRESENCE_ORCA_EXECUTABLE"})
+
+
+def test_load_env_file_strips_surrounding_quotes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _isolate_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    _write_env(tmp_path, 'ORCA_PRESENCE_ORCA_EXECUTABLE="C:/Tools/orca.exe"\n')
+
+    load_env_file()
+
+    assert os.environ["ORCA_PRESENCE_ORCA_EXECUTABLE"] == "C:/Tools/orca.exe"
+
+
+def test_load_env_file_treats_single_quotes_as_wrapping(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _isolate_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    _write_env(tmp_path, "ORCA_PRESENCE_ORCA_EXECUTABLE='orca'\n")
+
+    load_env_file()
+
+    assert os.environ["ORCA_PRESENCE_ORCA_EXECUTABLE"] == "orca"
+
+
+def test_load_env_file_does_not_override_existing_environment(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _isolate_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ORCA_DISCORD_CLIENT_ID", "999999999999999999")
+    _write_env(tmp_path, "ORCA_DISCORD_CLIENT_ID=123456789012345678\n")
+
+    loaded = load_env_file()
+
+    assert os.environ["ORCA_DISCORD_CLIENT_ID"] == "999999999999999999"
+    assert "ORCA_DISCORD_CLIENT_ID" not in loaded
+
+
+def test_load_env_file_no_file_is_a_noop(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _isolate_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    loaded = load_env_file()
+
+    assert loaded == frozenset()
+
+
+def test_load_env_file_explicit_path_is_used(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _isolate_env(monkeypatch)
+    path = _write_env(
+        tmp_path, "ORCA_DISCORD_CLIENT_ID=123456789012345678\n", name="custom.env"
+    )
+
+    loaded = load_env_file(path=path)
+
+    assert os.environ["ORCA_DISCORD_CLIENT_ID"] == "123456789012345678"
+    assert loaded == frozenset({"ORCA_DISCORD_CLIENT_ID"})
+
+
+def test_load_env_file_environment_variable_selects_the_file(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _isolate_env(monkeypatch)
+    path = _write_env(
+        tmp_path, "ORCA_DISCORD_CLIENT_ID=123456789012345678\n", name="custom.env"
+    )
+
+    loaded = load_env_file(env={ENV_FILE_ENV: str(path)})
+
+    assert os.environ["ORCA_DISCORD_CLIENT_ID"] == "123456789012345678"
+    assert loaded == frozenset({"ORCA_DISCORD_CLIENT_ID"})
+
+
+def test_load_env_file_missing_explicit_path_is_a_config_error(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ConfigError, match="path argument"):
+        load_env_file(path=tmp_path / "missing.env")
+
+
+def test_load_env_file_missing_environment_file_is_a_config_error(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ConfigError, match=ENV_FILE_ENV):
+        load_env_file(env={ENV_FILE_ENV: str(tmp_path / "missing.env")})
 
 
 # --- usage and cost settings -------------------------------------------------
