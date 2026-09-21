@@ -2,28 +2,31 @@
 rem ---------------------------------------------------------------------------
 rem orca-presence launcher for Task Scheduler / the Startup folder.
 rem
-rem Runs the console script installed by "pip install -e ." from the project's
-rem virtual environment and exits with the daemon's exit code.
+rem Everything is resolved relative to THIS script (never the caller's working
+rem directory), so the same file works in every checkout - the main clone and
+rem any git worktree.
+rem
+rem Interpreter order: .venv-check, then .venv, then python on PATH. The daemon
+rem runs as "python -m orca_presence.main" from the repository root, so the
+rem local source tree and the local .env file are the ones actually used.
 rem
 rem Environment overrides:
-rem   ORCA_PRESENCE_HOME     project root (defaults to this script's parent)
+rem   ORCA_PRESENCE_HOME     repository root (defaults to this script's parent)
 rem   ORCA_PRESENCE_LOG_FILE file to append the daemon output to (optional)
 rem ---------------------------------------------------------------------------
-setlocal
+setlocal EnableExtensions
 
 if not defined ORCA_PRESENCE_HOME for %%I in ("%~dp0..") do set "ORCA_PRESENCE_HOME=%%~fI"
 
-set "ORCA_PRESENCE_EXE=%ORCA_PRESENCE_HOME%\.venv\Scripts\orca-presence.exe"
-if not exist "%ORCA_PRESENCE_EXE%" (
-    echo [orca-presence] Virtual environment not found: "%ORCA_PRESENCE_EXE%" 1>&2
-    echo [orca-presence] Create it and install the project with: 1>&2
-    echo [orca-presence]     py -3.11 -m venv .venv ^&^& .venv\Scripts\python -m pip install -e . 1>&2
-    exit /b 2
-)
+set "PY=%ORCA_PRESENCE_HOME%\.venv-check\Scripts\python.exe"
+if not exist "%PY%" set "PY=%ORCA_PRESENCE_HOME%\.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=python"
+
+cd /d "%ORCA_PRESENCE_HOME%"
 
 if defined ORCA_PRESENCE_LOG_FILE (
-    "%ORCA_PRESENCE_EXE%" %* >> "%ORCA_PRESENCE_LOG_FILE%" 2>&1
+    "%PY%" -m orca_presence.main %* >> "%ORCA_PRESENCE_LOG_FILE%" 2>&1
 ) else (
-    "%ORCA_PRESENCE_EXE%" %*
+    "%PY%" -m orca_presence.main %*
 )
 exit /b %ERRORLEVEL%
