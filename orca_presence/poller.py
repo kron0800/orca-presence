@@ -33,7 +33,8 @@ Failure behaviour
 -----------------
 The poll loop never dies from an Orca CLI failure. When the runtime is
 explicitly unreachable (``runtime_unavailable``) the presence switches to
-``Idle``, because no agent can be running; a missing CLI executable, a timeout
+``No agents running``, because no agent can be running; a missing CLI
+executable, a timeout
 or any other :class:`~orca_presence.orca_client.OrcaError` is logged with its
 remediation hint and the previous presence stays in place until the next cycle.
 The Discord loop is the opposite:
@@ -263,9 +264,9 @@ class Poller:
     async def _poll_once(self) -> DiscordActivity | None:
         """Read one worktree listing and build the matching activity.
 
-        Returns an ``Idle`` activity when the runtime is unreachable and
-        ``None`` for a transient failure, in which case the previous presence
-        is kept.
+        Returns a ``No agents running`` activity when the runtime is unreachable
+        and ``None`` for a transient failure, in which case the previous
+        presence is kept.
         """
 
         try:

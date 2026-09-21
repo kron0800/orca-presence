@@ -82,10 +82,10 @@ def test_state_counts_active_and_blocked_agents(
 def test_state_is_idle_when_nothing_is_active_or_blocked(
     active: int, blocked: int, total: int
 ) -> None:
-    assert IDLE_STATE == "Idle"
+    assert IDLE_STATE == "No agents running"
     activity = build_activity(_snapshot(active, blocked, total), START_TS)
 
-    assert activity.state == "Idle"
+    assert activity.state == "No agents running"
     assert activity.state != ""
 
 

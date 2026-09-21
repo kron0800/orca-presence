@@ -278,7 +278,7 @@ async def test_poll_loop_keeps_running_while_orca_is_not_running() -> None:
 
     task = await _start(poller)
     await asyncio.wait_for(discord.published_event.wait(), timeout=1.0)
-    assert discord.published[0].state == "Idle"
+    assert discord.published[0].state == "No agents running"
     assert discord.published[0].party_size is None
 
     orca.worktree_error = None

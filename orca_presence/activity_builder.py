@@ -10,7 +10,7 @@ and can render the wire body with :meth:`DiscordActivity.to_payload`.
 Discord semantics
 -----------------
 * ``details`` always reads ``Playing Orca ADE``.
-* ``state`` reports ``"<active> active, <blocked> blocked"``, or ``Idle`` when
+* ``state`` reports ``"<active> active, <blocked> blocked"``, or ``No agents running`` when
   no agent is active or blocked (``waiting`` / ``done`` agents alone do not
   count as activity). The state is never an empty string.
 * ``party.size`` carries ``[active, total]`` so Discord can render
@@ -38,7 +38,7 @@ __all__ = [
 
 DETAILS = "Playing Orca ADE"
 LARGE_TEXT = "Orca Dev ADE"
-IDLE_STATE = "Idle"
+IDLE_STATE = "No agents running"
 DEFAULT_LARGE_IMAGE = "orca_ade"
 LARGE_IMAGE_ENV = "ORCA_PRESENCE_LARGE_IMAGE"
 

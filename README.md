@@ -27,7 +27,7 @@ Orca database and never parses terminal text.
 | Poll loop | Runs `orca worktree ps --json` every `poll_interval_seconds` (default 15s) and normalizes `agents[].state` into `active` / `blocked` / `total` counts. |
 | Discord loop | Keeps a `pypresence` IPC connection to the Discord desktop client alive, reconnecting with exponential backoff (1s → 30s) and republishing the latest activity after every reconnect. |
 | Throttle | De-duplicates unchanged activities but re-sends them once per interval, so a presence lost by Discord is always restored. |
-| Orca closed | The runtime-unavailable error (`runtime_unavailable`) switches the presence to `Idle` and polling keeps retrying; when Orca comes back the counts resume automatically. |
+| Orca closed | The runtime-unavailable error (`runtime_unavailable`) switches the presence to `No agents running` and polling keeps retrying; when Orca comes back the counts resume automatically. |
 | Discord closed | The daemon logs a warning, backs off and reconnects when the Discord desktop client is started again. |
 | CLI missing | A missing `orca` executable is logged with a remediation hint and the poller keeps running instead of crashing. |
 | Invalid client id | A handshake rejection is fatal (logged at `CRITICAL`) because no retry can fix it: fix `ORCA_DISCORD_CLIENT_ID` and restart. |
